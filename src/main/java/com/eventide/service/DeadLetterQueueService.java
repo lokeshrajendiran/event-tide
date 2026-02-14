@@ -50,6 +50,22 @@ public class DeadLetterQueueService {
         }
     }
 
+    public void sendRawToDlq(String rawMessage, String errorMessage) {
+        try {
+            Map<String, Object> dlqMessage = new HashMap<>();
+            dlqMessage.put("rawMessage", rawMessage);
+            dlqMessage.put("error", errorMessage);
+            dlqMessage.put("retryCount", 0);
+            dlqMessage.put("timestamp", System.currentTimeMillis());
+
+            String message = objectMapper.writeValueAsString(dlqMessage);
+            kafkaTemplate.send(DLQ_TOPIC, message);
+            log.info("Unparseable event sent to DLQ: error={}", errorMessage);
+        } catch (Exception e) {
+            log.error("CRITICAL: Failed to send raw event to DLQ: {}", e.getMessage(), e);
+        }
+    }
+
     public boolean isRetryable(int retryCount) {
         return retryCount < MAX_RETRIES;
     }

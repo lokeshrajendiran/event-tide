@@ -4,8 +4,8 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/eventide
-    username: eventide
-    password: eventide
+    username: lokesh-13579
+    password:
     driver-class-name: org.postgresql.Driver
 
   jpa:

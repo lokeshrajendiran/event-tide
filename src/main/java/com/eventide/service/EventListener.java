@@ -29,6 +29,7 @@ public class EventListener {
 
     private final ChoreographyEngine engine;
     private final ObjectMapper objectMapper;
+    private final DeadLetterQueueService deadLetterQueueService;
 
     @KafkaListener(topics = "eventide.events", groupId = "eventide-engine")
     public void onEvent(String message) {
@@ -37,7 +38,7 @@ public class EventListener {
             engine.process(event);
         } catch (Exception e) {
             log.error("Failed to process event: {}", e.getMessage(), e);
-            // TODO: Phase 3 — send to dead-letter queue for failed deserialization
+            deadLetterQueueService.sendRawToDlq(message, e.getMessage());
         }
     }
 }
