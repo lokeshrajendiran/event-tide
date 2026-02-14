@@ -162,6 +162,3 @@ src/main/java/com/eventide/
 - **Redis SET NX for dedup** — Atomic check-and-set with TTL provides thread-safe, distributed deduplication with automatic cleanup.
 - **Dead-letter queue** — Failed actions are preserved in a separate Kafka topic rather than being silently dropped, enabling investigation and retry.
 
-## License
-
-MIT
