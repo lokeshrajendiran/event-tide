@@ -108,7 +108,9 @@ POST /api/events
 | `payload.field == 'value'` | Equality check |
 | `payload.field != 'value'` | Inequality check |
 | `payload.field > 100` | Numeric greater than |
+| `payload.field >= 100` | Numeric greater than or equal |
 | `payload.field < 100` | Numeric less than |
+| `payload.field <= 100` | Numeric less than or equal |
 | `payload.nested.field == 'value'` | Nested field access |
 | *(empty or null)* | Always matches (catch-all) |
 
@@ -116,24 +118,31 @@ POST /api/events
 
 | Component | Technology |
 |---|---|
-| Backend | Java 17, Spring Boot 3.4 |
+| Backend | Java 17+, Spring Boot 3.4 |
 | Event Streaming | Apache Kafka (KRaft mode) |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL 12+ |
 | Cache / Dedup | Redis 7 |
-| Containerization | Docker Compose |
 
 ## Getting Started
 
 ### Prerequisites
 - Java 17+
 - Maven 3.9+
-- Docker & Docker Compose
+- PostgreSQL, Apache Kafka, Redis (via Homebrew, Docker, or any package manager)
 
-### Run
+### Setup
 
 ```bash
-# Start infrastructure (Postgres, Kafka, Redis)
-docker compose up -d
+# Install dependencies (macOS example)
+brew install postgresql kafka redis
+
+# Start services
+brew services start postgresql
+brew services start kafka
+brew services start redis
+
+# Create the database
+createdb eventide
 
 # Build and run the application
 mvn spring-boot:run
@@ -141,6 +150,8 @@ mvn spring-boot:run
 # Verify
 curl http://localhost:8080/api/workflows
 ```
+
+> **Docker alternative:** If you have Docker installed, run `docker compose up -d` to start all infrastructure services at once.
 
 ### Run Tests
 
@@ -152,7 +163,9 @@ mvn test
 
 ```
 src/main/java/com/eventide/
-├── config/             # App configuration (beans)
+├── config/
+│   ├── AppConfig.java             # Bean definitions (RestTemplate)
+│   └── EventideProperties.java    # Centralized topic & DLQ config
 ├── controller/         # REST API endpoints
 ├── dto/                # Request/Response objects
 ├── model/              # JPA entities (Workflow, WorkflowRule)
@@ -175,4 +188,16 @@ src/main/java/com/eventide/
 - **Redis SET NX for dedup** — Atomic check-and-set with TTL provides thread-safe, distributed deduplication with automatic cleanup.
 - **Dead-letter queue with auto-retry** — Failed actions are preserved in `eventide.dlq` and automatically retried with exponential backoff (5s → 25s → 125s). After 3 failures, events are parked in `eventide.dlq.dead` for manual investigation — ensuring no event is silently lost while preventing infinite retry loops.
 - **Dedup clearance on retry** — Redis dedup keys are cleared before re-publishing a retried event, so the retry isn't blocked by the same dedup check that passed on the original attempt.
+- **Externalized configuration** — All topic names, retry limits, and backoff delays are driven by `application.yml` via `@ConfigurationProperties` — no hardcoded strings, change once and it applies everywhere.
+
+## Future Ideas
+
+- **Compound conditions** — Support `AND` / `OR` operators in rule conditions (e.g., `payload.plan == 'enterprise' AND payload.region == 'US'`)
+- **DLQ admin API** — REST endpoints to inspect, replay, and purge permanently failed events from `eventide.dlq.dead` (persist to DB for queryability)
+- **Metrics & monitoring** — Spring Actuator + Prometheus metrics for event throughput, DLQ depth, retry rates, and action latencies
+- **Retry with backoff tiers** — Separate Kafka topics per delay tier (`eventide.retry.30s`, `eventide.retry.5m`) instead of `Thread.sleep`, enabling non-blocking retries
+- **Rate limiting** — Throttle action dispatch per workflow to prevent overwhelming downstream services
+- **Multi-tenancy** — Namespace isolation so multiple teams can define workflows without conflicts
+- **Event replay & audit log** — Persist all processed events to a log table for debugging, compliance, and replay capability
+- **Workflow versioning** — Track rule changes over time and support rollback to previous versions
 
