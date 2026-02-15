@@ -1,5 +1,6 @@
 package com.eventide.service;
 
+import com.eventide.config.EventideProperties;
 import com.eventide.dto.IncomingEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +15,7 @@ import java.util.Map;
  * Dead-Letter Queue handler for failed event processing.
  *
  * When an action dispatch fails (webhook down, Kafka error, etc.),
- * the event is sent to "eventide.dlq" topic with:
+ * the event is sent to the DLQ topic with:
  *   - The original event data
  *   - The error message
  *   - A retry count (incremented on each failure)
@@ -29,9 +30,7 @@ public class DeadLetterQueueService {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
-
-    private static final String DLQ_TOPIC = "eventide.dlq";
-    private static final int MAX_RETRIES = 3;
+    private final EventideProperties properties;
 
     public void sendToDlq(IncomingEvent event, String errorMessage, int retryCount) {
         try {
@@ -42,7 +41,7 @@ public class DeadLetterQueueService {
             dlqMessage.put("timestamp", System.currentTimeMillis());
 
             String message = objectMapper.writeValueAsString(dlqMessage);
-            kafkaTemplate.send(DLQ_TOPIC, event.getEventId(), message);
+            kafkaTemplate.send(properties.getTopics().getDlq(), event.getEventId(), message);
             log.info("Event sent to DLQ: eventId={}, retryCount={}, error={}",
                     event.getEventId(), retryCount, errorMessage);
         } catch (Exception e) {
@@ -59,14 +58,34 @@ public class DeadLetterQueueService {
             dlqMessage.put("timestamp", System.currentTimeMillis());
 
             String message = objectMapper.writeValueAsString(dlqMessage);
-            kafkaTemplate.send(DLQ_TOPIC, message);
+            kafkaTemplate.send(properties.getTopics().getDlq(), message);
             log.info("Unparseable event sent to DLQ: error={}", errorMessage);
         } catch (Exception e) {
             log.error("CRITICAL: Failed to send raw event to DLQ: {}", e.getMessage(), e);
         }
     }
 
+    /**
+     * Sends an event to the permanent DLQ topic when all retries are exhausted
+     * or the event is fundamentally unprocessable.
+     * Events here require manual investigation — they will NOT be retried automatically.
+     */
+    public void sendToPermanentDlq(String originalDlqMessage, String reason) {
+        try {
+            Map<String, Object> permanentDlqMessage = new HashMap<>();
+            permanentDlqMessage.put("originalDlqMessage", originalDlqMessage);
+            permanentDlqMessage.put("reason", reason);
+            permanentDlqMessage.put("timestamp", System.currentTimeMillis());
+
+            String message = objectMapper.writeValueAsString(permanentDlqMessage);
+            kafkaTemplate.send(properties.getTopics().getDlqDead(), message);
+            log.error("CRITICAL: Event moved to permanent DLQ: reason={}", reason);
+        } catch (Exception e) {
+            log.error("CRITICAL: Failed to send to permanent DLQ: {}", e.getMessage(), e);
+        }
+    }
+
     public boolean isRetryable(int retryCount) {
-        return retryCount < MAX_RETRIES;
+        return retryCount < properties.getDlq().getMaxRetries();
     }
 }

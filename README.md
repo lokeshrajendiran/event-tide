@@ -9,15 +9,26 @@ A configurable event choreography platform that lets you define event-driven wor
 │  Producers   │────▶│    Kafka     │────▶│  Choreography    │
 │ (any service)│     │   Topic      │     │  Engine          │
 └──────────────┘     └──────────────┘     └────────┬─────────┘
-                                                   │
-                           ┌───────────────────────┼──────────────────┐
-                           │                       │                  │
-                   ┌───────▼───────┐    ┌──────────▼────────┐  ┌─────▼──────────┐
-                   │  PostgreSQL   │    │      Redis        │  │    Action      │
-                   │  (workflow    │    │  (deduplication,  │  │    Dispatcher  │
-                   │   definitions │    │   event tracking) │  │  (Kafka, HTTP, │
-                   │   & rules)   │    │                   │  │   Webhooks)    │
-                   └───────────────┘    └───────────────────┘  └────────────────┘
+                            ▲                      │
+                            │              ┌───────┼───────────────────┐
+                            │              │       │                   │
+                    ┌───────┴───────┐  ┌───▼───────▼────────┐  ┌──────▼─────────┐
+                    │  DLQ Retry    │  │      Redis         │  │    Action      │
+                    │  Consumer     │  │  (deduplication,   │  │    Dispatcher  │
+                    │  (backoff +   │  │   event tracking)  │  │  (Kafka, HTTP, │
+                    │   re-publish) │  │                    │  │   Webhooks)    │
+                    └───────▲───────┘  └────────────────────┘  └──────┬─────────┘
+                            │                                         │ (failure)
+                    ┌───────┴───────┐                          ┌──────▼─────────┐
+                    │ eventide.dlq  │◀─────────────────────────│  Dead Letter   │
+                    │ (retry queue) │                          │  Queue Service │
+                    └───────┬───────┘                          └────────────────┘
+                            │ (max retries exceeded)
+                    ┌───────▼──────────┐     ┌───────────────┐
+                    │ eventide.dlq.dead│     │  PostgreSQL   │
+                    │ (permanent)      │     │  (workflow    │
+                    └──────────────────┘     │   definitions)│
+                                            └───────────────┘
 ```
 
 ### How It Works
@@ -27,7 +38,8 @@ A configurable event choreography platform that lets you define event-driven wor
 3. **Workflow matching** — Engine looks up active workflows by `eventType` + `source`
 4. **Rule evaluation** — Each rule's condition is evaluated against the event payload
 5. **Action dispatch** — Matching rules trigger actions: publish to Kafka, call webhooks, or make HTTP requests
-6. **Dead-letter queue** — Failed actions are sent to `eventide.dlq` for retry
+6. **Dead-letter queue** — Failed actions are sent to `eventide.dlq` for automatic retry with exponential backoff
+7. **Auto-retry** — DLQ consumer retries failed events up to 3 times (5s → 25s → 125s backoff), then parks in `eventide.dlq.dead`
 
 ## API
 
@@ -150,7 +162,8 @@ src/main/java/com/eventide/
     ├── ConditionEvaluator.java    # Expression parser for rule conditions
     ├── ActionDispatcher.java      # Executes actions (Kafka/Webhook/HTTP)
     ├── DeduplicationService.java  # Redis-based duplicate detection
-    ├── DeadLetterQueueService.java # Failed event handling
+    ├── DeadLetterQueueService.java # Failed event routing to DLQ
+    ├── DlqRetryConsumer.java      # Auto-retries DLQ events with exponential backoff
     ├── EventListener.java         # Kafka consumer entry point
     └── WorkflowService.java       # CRUD operations for workflows
 ```
@@ -160,5 +173,6 @@ src/main/java/com/eventide/
 - **Choreography over Orchestration** — Services react to events independently rather than being controlled by a central coordinator. This reduces coupling and single points of failure.
 - **Condition evaluation at runtime** — Rules are evaluated dynamically against event payloads, allowing workflow changes without redeployment.
 - **Redis SET NX for dedup** — Atomic check-and-set with TTL provides thread-safe, distributed deduplication with automatic cleanup.
-- **Dead-letter queue** — Failed actions are preserved in a separate Kafka topic rather than being silently dropped, enabling investigation and retry.
+- **Dead-letter queue with auto-retry** — Failed actions are preserved in `eventide.dlq` and automatically retried with exponential backoff (5s → 25s → 125s). After 3 failures, events are parked in `eventide.dlq.dead` for manual investigation — ensuring no event is silently lost while preventing infinite retry loops.
+- **Dedup clearance on retry** — Redis dedup keys are cleared before re-publishing a retried event, so the retry isn't blocked by the same dedup check that passed on the original attempt.
 

@@ -89,7 +89,13 @@ public class ChoreographyEngine {
                 } catch (Exception e) {
                     log.error("Failed to dispatch action for rule {}: {}",
                             rule.getId(), e.getMessage(), e);
-                    dlqService.sendToDlq(event, e.getMessage(), 0);
+                    // Carry forward retryCount if this is a retried event
+                    int retryCount = 0;
+                    Object rc = event.getPayload().get("_retryCount");
+                    if (rc instanceof Number) {
+                        retryCount = ((Number) rc).intValue();
+                    }
+                    dlqService.sendToDlq(event, e.getMessage(), retryCount);
                 }
             } else {
                 log.debug("Rule skipped: priority={}, condition='{}'",

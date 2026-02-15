@@ -58,4 +58,18 @@ public class DeduplicationService {
             return true;
         }
     }
+
+    /**
+     * Clears the dedup key for an event so it can be re-processed.
+     * Used by the DLQ retry consumer — without this, retried events
+     * would be blocked by the dedup check.
+     */
+    public void clearDedup(String eventId) {
+        if (eventId == null || eventId.isBlank()) {
+            return;
+        }
+        String key = DEDUP_PREFIX + eventId;
+        redisTemplate.delete(key);
+        log.info("Cleared dedup key for retry: eventId={}", eventId);
+    }
 }

@@ -31,7 +31,7 @@ public class EventListener {
     private final ObjectMapper objectMapper;
     private final DeadLetterQueueService deadLetterQueueService;
 
-    @KafkaListener(topics = "eventide.events", groupId = "eventide-engine")
+    @KafkaListener(topics = "${eventide.topics.events:eventide.events}", groupId = "eventide-engine")
     public void onEvent(String message) {
         try {
             IncomingEvent event = objectMapper.readValue(message, IncomingEvent.class);

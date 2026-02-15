@@ -35,3 +35,13 @@ spring:
 
 server:
   port: 8080
+
+# Eventide Configuration
+eventide:
+  topics:
+    events: eventide.events
+    dlq: eventide.dlq
+    dlq-dead: eventide.dlq.dead
+  dlq:
+    max-retries: 3
+    base-delay-ms: 5000
